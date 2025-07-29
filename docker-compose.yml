@@ -1,0 +1,36 @@
+# version: "3.8"
+services:
+  frontend:
+    build: ./frontend
+    # image: theglobalreena/dream-vacation-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - vacation-net
+  backend:
+    build: ./backend
+    # image: theglobalreena/dream-vacation-backend
+    ports:
+      - "3001:3001"
+    env_file: .env
+    depends_on:
+      - database
+    networks:
+      - vacation-net
+  database:
+    image: postgres:14
+    restart: always
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    env_file: .env
+    ports:
+      - "5432:5432"
+    networks:
+      - vacation-net
+volumes:
+  pgdata:
+networks:
+  vacation-net:
+    driver: bridge
