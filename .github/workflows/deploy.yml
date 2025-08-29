@@ -1,0 +1,106 @@
+name: Build and Deploy App
+on:
+  push:
+    branches:
+      - EC2-deploy
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docker-compose.yml'
+            frontend:
+              - 'frontend/**'
+              - 'docker-compose.yml'
+  build-backend:
+    name: Build & Push Backend
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Build and Push Backend Image
+        run: |
+          IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-backend:${{ github.sha }}
+          docker build -t $IMAGE ./backend
+          docker push $IMAGE
+          docker tag $IMAGE ${{ secrets.DOCKER_USERNAME }}/dream-backend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/dream-backend:latest
+  build-frontend:
+    name: Build & Push Frontend
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Build and Push Frontend Image
+        run: |
+          IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-frontend:${{ github.sha }}
+          docker build -t $IMAGE ./frontend
+          docker push $IMAGE
+          docker tag $IMAGE ${{ secrets.DOCKER_USERNAME }}/dream-frontend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/dream-frontend:latest
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy docker-compose.yml to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          source: "docker-compose.yml"
+          target: "/home/ubuntu/app/"
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          envs: BACKEND_IMAGE, FRONTEND_IMAGE, DOCKER_USERNAME, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT, REACT_APP_API_URL
+          script: |
+            set -e
+            mkdir -p /home/ubuntu/app
+            cd /home/ubuntu/app
+            echo "Creating .env file"
+            echo "BACKEND_IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-backend:${{ github.sha }}" > .env
+            echo "FRONTEND_IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-frontend:${{ github.sha }}" >> .env
+            echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" >> .env
+            echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
+            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+            echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
+            echo "POSTGRES_PORT=5432" >> .env
+            echo "REACT_APP_API_URL=${{ secrets.REACT_APP_API_URL }}" >> .env
+            echo "COUNTRIES_API_BASE_URL=https://restcountries.com/v3.1" >> .env
+            echo "Checking docker-compose.yml"
+            ls -la
+            cat docker-compose.yml
+            if [ ! -f docker-compose.yml ]; then
+              echo "Error: docker-compose.yml not found"
+              exit 1
+            fi
+            echo "Logging into DockerHub"
+            docker login -
