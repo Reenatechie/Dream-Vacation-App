@@ -103,4 +103,4 @@ jobs:
               exit 1
             fi
             echo "Logging into DockerHub"
-            docker login -
+            echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
