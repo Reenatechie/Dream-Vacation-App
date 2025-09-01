@@ -85,6 +85,7 @@ jobs:
             set -e
             mkdir -p /home/ubuntu/app
             cd /home/ubuntu/app
+
             echo "Creating .env file"
             echo "BACKEND_IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-backend:${{ github.sha }}" > .env
             echo "FRONTEND_IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-frontend:${{ github.sha }}" >> .env
@@ -95,6 +96,7 @@ jobs:
             echo "POSTGRES_PORT=5432" >> .env
             echo "REACT_APP_API_URL=${{ secrets.REACT_APP_API_URL }}" >> .env
             echo "COUNTRIES_API_BASE_URL=https://restcountries.com/v3.1" >> .env
+
             echo "Checking docker-compose.yml"
             ls -la
             cat docker-compose.yml
@@ -102,5 +104,13 @@ jobs:
               echo "Error: docker-compose.yml not found"
               exit 1
             fi
+
             echo "Logging into DockerHub"
             echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+            echo "Pulling backend and frontend images..."
+            docker pull $(grep BACKEND_IMAGE .env | cut -d'=' -f2)
+            docker pull $(grep FRONTEND_IMAGE .env | cut -d'=' -f2)
+
+            echo "Starting containers with docker-compose..."
+            docker-compose --env-file .env up -d --remove-orphans --force-recreate
