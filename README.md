@@ -146,5 +146,232 @@ The CI/CD pipeline is set up on the `github-actions`  branch, with distinct work
 
 
 
+---
+## Dream Vacation App Deployment on AWS
 
+This project demonstrates deploying the Dream Vacation App into an AWS EC2 instance using a custom VPC, proper networking setup, and an automated CI/CD pipeline.
+
+## Project Overview
+
+* **Infrastructure**: Set up via AWS Management Console (ClickOps).
+
+* **Compute**: Ubuntu EC2 instance with Docker & Docker Compose.
+
+* **CI/CD**: GitHub Actions pipeline builds and pushes the app image to Docker Hub, then deploys to EC2.
+
+* **App**: Dream Vacation App successfully accessible via EC2 Public IP.
+
+## Part 1 – Networking Setup
+
+1. **Custom VPC**
+
+- Name: dream-vpc
+
+- CIDR: 10.0.0.0/16
+
+2. **Subnet**
+
+- Name: dream-subnet
+
+- CIDR: 10.0.1.0/24
+
+3. **Internet Gateway**
+
+- Name: dream-igw
+
+- Route Table
+
+4. **Name: dream-rt**
+
+- Associated with dream-vpc
+
+- Route configured to allow internet access via dream-igw.
+
+## Screenshot of VPC
+
+
+<img width="1440" height="854" alt="Screenshot 2025-09-02 at 14 01 29" src="https://github.com/user-attachments/assets/a7946f12-c5e5-4bb4-b617-014e39ed75cf" />
+
+
+## Screenshot of Subnet
+
+<img width="1440" height="854" alt="Screenshot 2025-09-02 at 14 01 44" src="https://github.com/user-attachments/assets/a3122d07-2e48-4ea6-a93a-24892e4036dd" />
+
+## Screenshot of IGW
+
+<img width="1440" height="854" alt="Screenshot 2025-09-02 at 14 02 02" src="https://github.com/user-attachments/assets/8e4fd3bb-421b-4e24-a739-e1179a85e296" />
+
+## Screenshot of Route table
+<img width="1440" height="854" alt="Screenshot 2025-09-02 at 14 01 53" src="https://github.com/user-attachments/assets/17782512-ad42-4165-bb6b-8b6b3db474bb" />
+
+## Part 2 – EC2 Instance Setup
+
+1. * **EC2 Instance**
+
+- AMI: Ubuntu
+
+- Type: t3.micro
+
+- Security Group: Opened HTTP (80) and SSH (22).
+
+2. * **User Data Script**
+
+- Installed Docker & Docker Compose on startup.
+
+## Screenshot of Running Instance
+
+<img width="1440" height="854" alt="Screenshot 2025-09-02 at 14 00 59" src="https://github.com/user-attachments/assets/1fdd8505-bce5-4012-a648-0da14b85fba3" />
+
+## Part 3 – CI/CD Deployment
+
+1. * **CI/CD Pipeline**
+
+- Builds app image and pushes to Docker Hub.
+
+- Final stage SSHs into EC2, copies project files, pulls latest image, and runs docker-compose up -d.
+
+## deploy pipleline
+```bash
+name: Build and Deploy App
+on:
+  push:
+    branches:
+      - EC2-deploy
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docker-compose.yml'
+            frontend:
+              - 'frontend/**'
+              - 'docker-compose.yml'
+  build-backend:
+    name: Build & Push Backend
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Build and Push Backend Image
+        run: |
+          IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-backend:${{ github.sha }}
+          docker build -t $IMAGE ./backend
+          docker push $IMAGE
+          docker tag $IMAGE ${{ secrets.DOCKER_USERNAME }}/dream-backend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/dream-backend:latest
+  build-frontend:
+    name: Build & Push Frontend
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Build and Push Frontend Image
+        run: |
+          IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-frontend:${{ github.sha }}
+          docker build -t $IMAGE ./frontend
+          docker push $IMAGE
+          docker tag $IMAGE ${{ secrets.DOCKER_USERNAME }}/dream-frontend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/dream-frontend:latest
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy docker-compose.yml to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          source: "docker-compose.yml"
+          target: "/home/ubuntu/app/"
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          envs: BACKEND_IMAGE, FRONTEND_IMAGE, DOCKER_USERNAME, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT, REACT_APP_API_URL
+          script: |
+            set -e
+            mkdir -p /home/ubuntu/app
+            cd /home/ubuntu/app
+
+            echo "Creating .env file"
+            echo "BACKEND_IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-backend:${{ github.sha }}" > .env
+            echo "FRONTEND_IMAGE=${{ secrets.DOCKER_USERNAME }}/dream-frontend:${{ github.sha }}" >> .env
+            echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" >> .env
+            echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
+            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+            echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
+            echo "POSTGRES_PORT=5432" >> .env
+            echo "REACT_APP_API_URL=${{ secrets.REACT_APP_API_URL }}" >> .env
+            echo "COUNTRIES_API_BASE_URL=https://restcountries.com/v3.1" >> .env
+            echo "POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}" >> .env
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+
+            echo "Checking docker-compose.yml"
+            ls -la
+            cat docker-compose.yml
+            if [ ! -f docker-compose.yml ]; then
+              echo "Error: docker-compose.yml not found"
+              exit 1
+            fi
+
+            echo "Logging into DockerHub"
+            echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+            echo "Pulling backend and frontend images..."
+            docker pull $(grep BACKEND_IMAGE .env | cut -d'=' -f2)
+            docker pull $(grep FRONTEND_IMAGE .env | cut -d'=' -f2)
+
+            echo "Starting containers with docker-compose..."
+            docker-compose --env-file .env up -d --remove-orphans --force-recreate
+```
+
+## 2.  Testing Deployment
+
+- Accessed the app via EC2 Public IP → Dream Vacation App running successfully.
+
+## Screenshot of Github action pipeline
+
+<img width="1440" height="854" alt="Screenshot 2025-09-02 at 14 00 41" src="https://github.com/user-attachments/assets/f44a10f6-4206-4ff0-8b64-3e79343b6b8e" />
+
+## Screenshot of Frontend preview
+
+<img width="982" height="685" alt="Screenshot 2025-09-02 at 14 00 00" src="https://github.com/user-attachments/assets/e5c55569-1062-4bfe-9690-6f5e960b781b" />
+
+## Screenshot of backend preview
+
+
+<img width="982" height="685" alt="Screenshot 2025-09-02 at 13 59 47" src="https://github.com/user-attachments/assets/247d95b7-fe00-4168-9a28-24fde6b491cb" />
+
+## Notes
+
+- Deployment was done entirely through AWS Console (ClickOps) and GitHub Actions.
+
+- Docker Compose ensures easy container orchestration and reproducibility.
 
