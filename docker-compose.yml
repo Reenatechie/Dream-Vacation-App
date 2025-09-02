@@ -3,10 +3,14 @@ services:
   backend:
     image: ${BACKEND_IMAGE}
     env_file: .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - PORT=3001
     ports:
       - "3001:3001"
     depends_on:
       - db
+
   frontend:
     image: ${FRONTEND_IMAGE}
     env_file: .env
@@ -14,6 +18,7 @@ services:
       - "80:80"
     depends_on:
       - backend
+
   db:
     image: postgres:15
     environment:
