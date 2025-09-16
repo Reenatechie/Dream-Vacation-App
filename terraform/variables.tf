@@ -20,5 +20,5 @@ variable "instance_type" {
 
 variable "key_name" {
   description = "Name of the EC2 key pair"
-  default     = "dream-app-key-pair"
+  default     = "dream-app-keypair"
 }
