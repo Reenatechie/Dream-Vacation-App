@@ -14,12 +14,12 @@ output "security_group_id" {
 }
 
 output "key_pair_name" {
-  value       = var.key_name
+  value       = aws_key_pair.dream_key.key_name
   description = "The name of the EC2 key pair"
 }
 
 output "ssh_command" {
-  value       = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${aws_instance.dream_ec2.public_ip}"
+  value       = "ssh -i ~/.ssh/${aws_key_pair.dream_key.key_name} ubuntu@${aws_instance.dream_ec2.public_ip}"
   description = "SSH command to connect to the EC2 instance"
 }
 

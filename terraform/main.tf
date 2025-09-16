@@ -11,6 +11,9 @@ data "aws_ami" "ubuntu" {
   owners = ["099720109477"] # Canonical (official Ubuntu owner).
 }
 
+# ---------------------------
+# Networking
+# ---------------------------
 resource "aws_vpc" "dream_vpc" {
   cidr_block = var.vpc_cidr
   tags = {
@@ -21,7 +24,7 @@ resource "aws_vpc" "dream_vpc" {
 resource "aws_subnet" "dream_subnet" {
   vpc_id                  = aws_vpc.dream_vpc.id
   cidr_block              = var.subnet_cidr
-  map_public_ip_on_launch = true # Automatically assign public IP to instances in this subnet.
+  map_public_ip_on_launch = true
   tags = {
     Name = "dream-subnet"
   }
@@ -50,6 +53,9 @@ resource "aws_route_table_association" "dream_subnet_association" {
   route_table_id = aws_route_table.dream_rt.id
 }
 
+# ---------------------------
+# Security
+# ---------------------------
 resource "aws_security_group" "dream_sg" {
   name        = "dream-sg"
   description = "Security group for Dream Vacation App EC2"
@@ -59,41 +65,52 @@ resource "aws_security_group" "dream_sg" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # Allow SSH from anywhere (restrict to your IP in production).
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # Allow HTTP for frontend.
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
     from_port   = 3001
     to_port     = 3001
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # Allow backend port as per your notes.
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"] # Allow all outbound traffic.
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
+# ---------------------------
+# Key Pair (New)
+# ---------------------------
+resource "aws_key_pair" "dream_key" {
+  key_name   = var.key_name
+  public_key = file("~/.ssh/dream-app-keypair.pub")
+}
+
+# ---------------------------
+# EC2 Instance
+# ---------------------------
 resource "aws_instance" "dream_ec2" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.dream_subnet.id
   vpc_security_group_ids = [aws_security_group.dream_sg.id]
-  key_name               = var.key_name
-  user_data              = <<-EOF
+  key_name               = aws_key_pair.dream_key.key_name
+
+  user_data = <<-EOF
     #!/bin/bash
     set -e
-
     # Install Docker
     sudo apt update -y
     sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
@@ -103,7 +120,7 @@ resource "aws_instance" "dream_ec2" {
     sudo apt install -y docker-ce docker-ce-cli containerd.io
     sudo usermod -aG docker ubuntu
 
-    # Install Docker Compose (latest version as of 2025; update if needed)
+    # Install Docker Compose
     sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     sudo chmod +x /usr/local/bin/docker-compose
 
@@ -111,7 +128,6 @@ resource "aws_instance" "dream_ec2" {
     wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
     sudo dpkg -i -E ./amazon-cloudwatch-agent.deb
 
-    # Configure CloudWatch Agent for CPU metrics
     sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
     cat <<'EOC' > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
     {
@@ -139,7 +155,6 @@ resource "aws_instance" "dream_ec2" {
     }
     EOC
 
-    # Start CloudWatch Agent
     sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
   EOF
 
@@ -148,6 +163,9 @@ resource "aws_instance" "dream_ec2" {
   }
 }
 
+# ---------------------------
+# CloudWatch Alarm
+# ---------------------------
 resource "aws_cloudwatch_metric_alarm" "dream_cpu_alarm" {
   alarm_name          = "dream-cpu-alarm"
   comparison_operator = "GreaterThanThreshold"
@@ -161,5 +179,4 @@ resource "aws_cloudwatch_metric_alarm" "dream_cpu_alarm" {
   dimensions = {
     InstanceId = aws_instance.dream_ec2.id
   }
-  # Note: No alarm actions specified (e.g., no SNS); add if needed for notifications.
 }
